@@ -104,6 +104,28 @@ Der Multiviewer läuft auch auf dem Pi 4. Unterschiede zum Pi 5:
 
 Die Pi-4-Angaben sind Schätzwerte und nicht auf echter Hardware gemessen.
 
+### Dateien für den Pi vorbereiten
+
+Die Spalte **Decoder** im Dashboard zeigt pro Kachel `HW` oder `SW`, dazu Codec, Auflösung, fps und verworfene Frames.
+Steht dort `SW` oder steigen die ⚠-Zähler, ist die Datei zu schwer für den Pi. Die Datei sollte so groß sein wie die Kachel,
+nicht wie das Original. Am besten **auf dem PC** umwandeln (auf dem Pi selbst dauert das sehr lange):
+
+```bash
+# Pi 4: H.264, 4:2:0, passend zur Kachelgröße (hier 960x540), 25/30 fps, ohne Ton
+ffmpeg -i input.mp4 -vf "scale=960:-2,fps=30,format=yuv420p" -c:v libx264 -profile:v high -level 4.0 \
+       -preset slow -crf 22 -an output.mp4
+
+# Pi 5: HEVC (H.265), hier hat nur HEVC einen Hardware-Decoder
+ffmpeg -i input.mp4 -vf "scale=960:-2,fps=30,format=yuv420p" -c:v libx265 -preset medium -crf 24 -an output.mp4
+```
+
+Typische Fallen: 4:4:4- oder 10-bit-H.264 (der Pi-4-Decoder kann nur 8-bit 4:2:0), 1080p60 in einer kleinen Kachel,
+und 4K-Dateien. Dasselbe gilt für RTSP-Quellen: Encoder auf die Kachelgröße und `yuv420p` stellen.
+
+Neu unter **Performance** im Dashboard: globale und kachelweise Hardware-Decoder-Wahl, Decoder-Threads und `nice`.
+Die Decoder laufen mit niedrigerer Priorität, damit Web-UI, X und SSH bedienbar bleiben. Der Kopf des Dashboards
+zeigt CPU-Last, Temperatur, freien RAM sowie Unterspannung/Drosselung (`vcgencmd get_throttled`).
+
 ## Einstellungen (`POST /api/settings`)
 
 | Key | Default | Bedeutung |
@@ -115,6 +137,8 @@ Die Pi-4-Angaben sind Schätzwerte und nicht auf echter Hardware gemessen.
 | `gap` | `4` | Standard-Abstand für Vorlagen (px) |
 | `watchdog` | `true` | Auto-Reconnect an/aus |
 | `freeze_timeout` | `12` | Sekunden ohne Fortschritt → Stream gilt als eingefroren |
+| `nice` | `5` | Priorität der Decoder (0 = normal, 19 = niedrigste) |
+| `overload_guard` | `true` | Watchdog verschiebt Reconnects, solange die CPU überlastet ist |
 | `extra_mpv_args` | `[]` | zusätzliche mpv-Argumente für alle Kacheln |
 
 Settings, die den mpv-Start betreffen, wirken beim nächsten Play bzw. Reconnect der jeweiligen Kachel.
