@@ -1,6 +1,8 @@
-# Raspberry Pi Multiviewer
+# rpi-web-multiviewer
 
-Multiviewer für den Raspberry Pi 5 auf Basis von
+**Repo:** https://github.com/Felix2180/rpi-web-multiviewer
+
+Web-gesteuerter Multiviewer für Raspberry Pi 5 und Pi 4 auf Basis von
 [raspberry-pi-single-zone-video-player](https://github.com/keep-on-walking/raspberry-pi-single-zone-video-player).
 Statt einer Videozone gibt es beliebig viele **Kacheln**. Jede Kachel ist ein eigener mpv-Prozess
 mit eigener Quelle, eigenem Label, Tally-Rahmen und eigenem Watchdog.
@@ -21,14 +23,35 @@ mit eigener Quelle, eigenem Label, Tally-Rahmen und eigenem Watchdog.
 
 ## Installation
 
+Voraussetzung: Raspberry Pi OS Lite (64-bit), frisch aufgesetzt, Netzwerkverbindung.
+
+**Einzeiler** (per SSH auf dem Pi):
+
 ```bash
-git clone <dein-fork>/rpi-multiviewer.git
-cd rpi-multiviewer
+curl -sSL https://raw.githubusercontent.com/Felix2180/rpi-web-multiviewer/main/install.sh | sudo bash
+```
+
+**Oder manuell:**
+
+```bash
+git clone https://github.com/Felix2180/rpi-web-multiviewer.git
+cd rpi-web-multiviewer
 sudo bash install.sh
 sudo reboot
 ```
 
-Danach `http://<pi-ip>:5000` öffnen.
+Danach `http://<pi-ip>:5000` öffnen. Der Bildschirm bleibt schwarz, bis eine Kachel läuft.
+
+### Update
+
+```bash
+cd rpi-web-multiviewer
+git pull
+sudo bash install.sh
+sudo reboot
+```
+
+Zustand (`config/state.json`), Presets (`config/layouts.json`) und hochgeladene Videos bleiben beim Update erhalten.
 
 Das Upgrade über eine bestehende Single-Zone-Installation funktioniert (gleiche Pfade unter `/opt/rpi-video-player`).
 Der Installer entfernt dabei den alten `stream-watchdog`-Dienst. Der hat bei jedem Neustart **alle** mpv-Prozesse beendet
@@ -66,6 +89,20 @@ Empfehlungen:
 - Mit `htop` prüfen, wie die CPU-Last ist; eine Kachel ruckelt erst, wenn alle Kerne am Anschlag sind
 
 Diese Zahlen sind Schätzwerte. Es lohnt sich, die eigenen Kamera-Streams einmal mit `testpattern`-Kacheln als Referenz durchzumessen.
+
+### Raspberry Pi 4
+
+Der Multiviewer läuft auch auf dem Pi 4. Unterschiede zum Pi 5:
+
+- Der Pi 4 hat einen **H.264-Hardware-Decoder** (ca. 1080p60 gesamt, geteilt über alle Kacheln), also grob 2× 1080p30 oder ca. 4× 720p30 in Hardware. Der Rest läuft in Software auf der deutlich schwächeren CPU.
+- Ob `hwdec=auto` den H.264-Decoder nutzt, kann je nach mpv-Version variieren. Im Zweifel explizit setzen und mit `htop` prüfen:
+  ```bash
+  curl -X POST http://<pi>:5000/api/settings -H 'Content-Type: application/json' -d '{"hwdec":"v4l2m2m-copy"}'
+  ```
+- Startet X nicht: mit `ls /dev/dri/` prüfen, ob `card0` statt `card1` existiert, und `/etc/X11/xorg.conf.d/20-modesetting.conf` anpassen. Den HDMI-Ausgangsnamen für `xrandr` im `x11-server.service` mit `DISPLAY=:1 xrandr` prüfen.
+- RAM: ca. 100–150 MB pro Kachel.
+
+Die Pi-4-Angaben sind Schätzwerte und nicht auf echter Hardware gemessen.
 
 ## Einstellungen (`POST /api/settings`)
 
@@ -134,6 +171,11 @@ cat /opt/rpi-video-player/config/state.json        # aktueller Zustand
 └── data/videos/              # Uploads
 ```
 
+## Issues & Beiträge
+
+Fehler und Wünsche bitte als Issue: https://github.com/Felix2180/rpi-web-multiviewer/issues
+
 ## Lizenz
 
-MIT (wie das Original), siehe LICENSE.
+MIT (wie das Original), siehe LICENSE. Basiert auf
+[keep-on-walking/raspberry-pi-single-zone-video-player](https://github.com/keep-on-walking/raspberry-pi-single-zone-video-player).

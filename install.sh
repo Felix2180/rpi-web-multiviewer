@@ -10,6 +10,25 @@
 
 set -e
 
+REPO_URL="https://github.com/Felix2180/rpi-web-multiviewer.git"
+
+# -----------------------------------------------------------------------------
+# Bootstrap: when run via "curl ... | sudo bash" there are no project files next
+# to this script -> clone the repo and re-run the installer from the checkout.
+# -----------------------------------------------------------------------------
+SCRIPT_SRC="${BASH_SOURCE[0]:-}"
+if [ -z "$SCRIPT_SRC" ] || [ ! -f "$(dirname "$SCRIPT_SRC")/src/video_controller.py" ]; then
+    if [ "$EUID" -ne 0 ]; then
+        echo "Please run as root: curl -sSL <url>/install.sh | sudo bash"
+        exit 1
+    fi
+    echo "Fetching rpi-web-multiviewer from $REPO_URL ..."
+    command -v git >/dev/null 2>&1 || { apt update && apt install -y git; }
+    TMP_DIR="$(mktemp -d)"
+    git clone --depth 1 "$REPO_URL" "$TMP_DIR/rpi-web-multiviewer"
+    exec bash "$TMP_DIR/rpi-web-multiviewer/install.sh" "$@" < /dev/tty
+fi
+
 echo "======================================================================="
 echo "  Raspberry Pi Multiviewer - Installer"
 echo "======================================================================="
@@ -26,7 +45,7 @@ echo "  * Raspberry Pi 5 (or Pi 4)"
 echo "  * Raspberry Pi OS Lite (64-bit) - headless recommended"
 echo "  * Internet connection"
 echo ""
-read -p "Continue with installation? (y/N) " -n 1 -r
+read -p "Continue with installation? (y/N) " -n 1 -r < /dev/tty
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Installation cancelled."
@@ -263,7 +282,7 @@ echo ""
 echo "======================================================================="
 echo ""
 
-read -p "Reboot now? (y/N) " -n 1 -r
+read -p "Reboot now? (y/N) " -n 1 -r < /dev/tty
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "Rebooting..."
