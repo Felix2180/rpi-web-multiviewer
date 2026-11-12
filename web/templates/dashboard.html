@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raspberry Pi Multiviewer</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>🎛️ Multiviewer</h1>
+        <div class="header-actions">
+            <button id="play-all" class="btn btn-success">▶ Play all</button>
+            <button id="stop-all" class="btn btn-danger">⏹ Stop all</button>
+            <div class="header-info">
+                <span id="status-indicator" class="status-stopped">●</span>
+                <span id="status-text">0 / 0 live</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-content">
+        <!-- ============================ LEFT: canvas ============================ -->
+        <div class="panel visual-panel">
+            <div class="toolbar">
+                <div class="control-group inline">
+                    <label>Display</label>
+                    <div class="resolution-controls">
+                        <input type="number" id="display-width" class="input-number" value="1920" min="640" max="7680">
+                        <span>×</span>
+                        <input type="number" id="display-height" class="input-number" value="1080" min="480" max="4320">
+                        <button id="update-resolution" class="btn btn-secondary btn-sm">Set</button>
+                    </div>
+                </div>
+                <div class="control-group inline">
+                    <label>Snap</label>
+                    <select id="snap" class="video-select select-sm">
+                        <option value="0">off</option>
+                        <option value="4">4 px</option>
+                        <option value="8" selected>8 px</option>
+                        <option value="20">20 px</option>
+                    </select>
+                </div>
+            </div>
+
+            <canvas id="layout-canvas" width="1280" height="720"></canvas>
+            <p class="canvas-help">Click a tile to select • drag to move • drag corners to resize • changes apply on release</p>
+
+            <h3>Templates</h3>
+            <div class="template-buttons" id="template-buttons"></div>
+
+            <div class="grid-builder">
+                <label>Custom grid</label>
+                <input type="number" id="grid-cols" class="input-number" value="3" min="1" max="8" title="Columns">
+                <span>×</span>
+                <input type="number" id="grid-rows" class="input-number" value="2" min="1" max="8" title="Rows">
+                <label>Gap</label>
+                <input type="number" id="grid-gap" class="input-number" value="4" min="0" max="100" title="Gap in px">
+                <button id="apply-grid" class="btn btn-secondary btn-sm">Apply grid</button>
+                <button id="add-zone" class="btn btn-primary btn-sm">＋ Add tile</button>
+            </div>
+
+            <h3>Tiles</h3>
+            <table class="zone-table">
+                <thead><tr><th></th><th>Name</th><th>Source</th><th>State</th><th>Audio</th><th>Tally</th><th></th></tr></thead>
+                <tbody id="zone-table-body"></tbody>
+            </table>
+        </div>
+
+        <!-- ============================ RIGHT: controls ============================ -->
+        <div class="panel control-panel">
+            <div class="section" id="zone-editor">
+                <h3>Selected tile <span id="zone-editor-id" class="muted"></span></h3>
+                <div id="zone-editor-empty" class="muted">No tile selected – click one on the canvas.</div>
+
+                <div id="zone-editor-body" style="display:none;">
+                    <div class="control-group">
+                        <label>Name / label</label>
+                        <input type="text" id="z-name" class="input-text" placeholder="CAM 1">
+                    </div>
+
+                    <div class="control-group">
+                        <label>Source <span class="muted">(file, rtsp://, srt://, udp://, http(s)://, testpattern)</span></label>
+                        <input type="text" id="z-source" class="input-text" list="source-list" placeholder="rtsp://user:pass@10.0.0.10:554/stream2">
+                        <datalist id="source-list"></datalist>
+                    </div>
+
+                    <div class="playback-controls">
+                        <button id="z-play" class="btn btn-primary">▶ Play</button>
+                        <button id="z-pause" class="btn btn-secondary">⏸</button>
+                        <button id="z-stop" class="btn btn-danger">⏹ Stop</button>
+                    </div>
+                    <div id="z-error" class="error-text"></div>
+
+                    <div class="control-group">
+                        <label>Tally</label>
+                        <div class="seg" id="z-tally">
+                            <button data-v="off" class="btn btn-toggle">Off</button>
+                            <button data-v="preview" class="btn btn-toggle">PVW</button>
+                            <button data-v="program" class="btn btn-toggle">PGM</button>
+                            <button data-v="standby" class="btn btn-toggle">STBY</button>
+                        </div>
+                    </div>
+
+                    <div class="control-group two-col">
+                        <label class="checkbox-label"><input type="checkbox" id="z-show-label"> Show label</label>
+                        <select id="z-label-pos" class="video-select select-sm">
+                            <option value="top-left">top left</option>
+                            <option value="top-center">top center</option>
+                            <option value="top-right">top right</option>
+                            <option value="bottom-left">bottom left</option>
+                            <option value="bottom-center">bottom center</option>
+                            <option value="bottom-right">bottom right</option>
+                        </select>
+                    </div>
+
+                    <div class="control-group">
+                        <label class="checkbox-label"><input type="checkbox" id="z-audio"> Audio from this tile (audio follow)</label>
+                        <label>Volume: <span id="z-volume-value">50</span>%</label>
+                        <input type="range" id="z-volume" min="0" max="100" value="50" class="slider">
+                    </div>
+
+                    <div class="control-group">
+                        <label class="checkbox-label"><input type="checkbox" id="z-low-latency"> Low latency (live streams)</label>
+                        <label class="checkbox-label"><input type="checkbox" id="z-low-cpu"> Low CPU (skip loop filter, drop frames)</label>
+                        <label class="checkbox-label"><input type="checkbox" id="z-loop"> Loop (files)</label>
+                    </div>
+
+                    <div class="control-group">
+                        <label>Geometry</label>
+                        <div class="geometry-grid">
+                            <div><label>X</label><input type="number" id="z-x" class="input-number"></div>
+                            <div><label>Y</label><input type="number" id="z-y" class="input-number"></div>
+                            <div><label>W</label><input type="number" id="z-w" class="input-number"></div>
+                            <div><label>H</label><input type="number" id="z-h" class="input-number"></div>
+                        </div>
+                    </div>
+
+                    <div class="playback-controls">
+                        <button id="z-raise" class="btn btn-secondary btn-sm" title="Bring to front">⬆ Front</button>
+                        <button id="z-lower" class="btn btn-secondary btn-sm" title="Send to back">⬇ Back</button>
+                        <button id="z-full" class="btn btn-secondary btn-sm" title="Make fullscreen">⛶ Full</button>
+                        <button id="z-delete" class="btn btn-danger btn-sm">🗑 Delete</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Layout presets</h3>
+                <div class="preset-save">
+                    <input type="text" id="preset-name" placeholder="Preset name…" class="input-text">
+                    <input type="text" id="preset-description" placeholder="Description (optional)…" class="input-text">
+                    <button id="save-preset" class="btn btn-primary full-width">💾 Save current layout + sources</button>
+                </div>
+                <div class="preset-list" id="preset-list"></div>
+            </div>
+
+            <div class="section">
+                <h3>Files</h3>
+                <div class="file-upload">
+                    <input type="file" id="file-input" accept="video/*" style="display:none;">
+                    <button id="upload-btn" class="btn btn-primary full-width">📁 Upload video</button>
+                    <div id="upload-progress" class="upload-progress" style="display:none;">
+                        <div id="upload-progress-bar" class="upload-progress-bar"></div>
+                        <span id="upload-progress-text">0%</span>
+                    </div>
+                </div>
+                <div class="file-list" id="file-list"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/static/js/api-client.js"></script>
+<script src="/static/js/canvas-controller.js"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
