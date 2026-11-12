@@ -73,6 +73,11 @@ function bindUI() {
     $('z-low-latency').onchange = (e) => patch({ low_latency: e.target.checked });
     $('z-low-cpu').onchange = (e) => patch({ low_cpu: e.target.checked });
     $('z-loop').onchange = (e) => patch({ loop: e.target.checked });
+    $('z-hwdec').onchange = (e) => patch({ hwdec: e.target.value });
+    const setting = (data) => run(() => apiClient.post('/api/settings', data));
+    $('s-hwdec').onchange = (e) => setting({ hwdec: e.target.value });
+    $('s-threads').onchange = (e) => setting({ decoder_threads: parseInt(e.target.value, 10) });
+    $('s-nice').onchange = (e) => setting({ nice: parseInt(e.target.value, 10) });
     $('z-audio').onchange = (e) => run(() => apiClient.audioFollow(e.target.checked ? sel() : null));
     $('z-volume').oninput = (e) => ($('z-volume-value').textContent = e.target.value);
     $('z-volume').onchange = (e) => run(() => apiClient.setVolume(sel(), parseInt(e.target.value, 10)));
@@ -128,6 +133,12 @@ async function refresh() {
     canvas.setZones(state.zones);
     renderTable();
     renderHeader();
+    renderSystem();
+    if (state.settings) {
+        setVal('s-hwdec', state.settings.hwdec, false);
+        setVal('s-threads', state.settings.decoder_threads, false);
+        setVal('s-nice', state.settings.nice, false);
+    }
     fillEditor(selectedZone(), false);
 }
 
@@ -136,6 +147,30 @@ function renderHeader() {
     const bad = state.zones.some((z) => z.health === 'reconnecting' || z.health === 'lost' || z.status === 'error');
     $('status-text').textContent = `${live} / ${state.zones.length} live` + (bad ? ' • ⚠ signal problem' : '');
     $('status-indicator').className = bad ? 'status-paused' : (live ? 'status-playing' : 'status-stopped');
+}
+
+function decoderText(d) {
+    if (!d || !d.width) return '–';
+    const hw = d.hwdec ? `<span class="pill pill-playing" title="${esc(d.hwdec)}">HW</span>`
+                       : '<span class="pill pill-error" title="software decoding">SW</span>';
+    const drops = (d.decoder_drops || 0) + (d.vo_drops || 0);
+    const fps = d.fps ? Math.round(d.fps) : '?';
+    return `${hw} ${esc(d.codec || '')} ${d.width}×${d.height}@${fps}${drops ? ` <span class="warn" title="dropped frames">⚠${drops}</span>` : ''}`;
+}
+
+function renderSystem() {
+    const s = state.system || {};
+    const parts = [];
+    if (s.load !== undefined) {
+        const hot = s.load > (s.cores || 1);
+        parts.push(`<span class="${hot ? 'warn' : ''}">CPU ${s.load}/${s.cores}</span>`);
+    }
+    if (s.temp_c !== undefined) parts.push(`<span class="${s.temp_c >= 75 ? 'warn' : ''}">${s.temp_c}°C</span>`);
+    if (s.mem_avail_mb !== undefined) parts.push(`<span class="${s.mem_avail_mb < 300 ? 'warn' : ''}">RAM ${s.mem_avail_mb} MB free</span>`);
+    if (s.undervoltage_now) parts.push('<span class="warn">⚡ UNDERVOLTAGE</span>');
+    else if (s.undervoltage_since_boot) parts.push('<span class="warn" title="undervoltage occurred since boot">⚡ undervoltage seen</span>');
+    if (s.throttled_now || s.soft_temp_limit_now) parts.push('<span class="warn">🔥 THROTTLED</span>');
+    $('sys-info').innerHTML = parts.join(' · ');
 }
 
 function renderTable() {
@@ -147,6 +182,7 @@ function renderTable() {
             <td><span class="swatch" style="background:${color}"></span>${z.id}</td>
             <td>${esc(z.name)}</td>
             <td class="src" title="${esc(shortSrc(z.source))}">${esc(shortSrc(z.source))}</td>
+            <td class="dec">${decoderText(z.decoder)}</td>
             <td><span class="pill pill-${st}">${st}</span></td>
             <td><input type="radio" name="audio-follow" data-audio="${z.id}" ${z.audio ? 'checked' : ''}></td>
             <td><button class="btn btn-icon tally-${z.tally}" data-tally="${z.id}" title="Cycle tally">${{ off: '–', preview: 'PVW', program: 'PGM', standby: 'STB' }[z.tally]}</button></td>
@@ -156,7 +192,7 @@ function renderTable() {
             </td></tr>`;
     }).join('');
     if (body._last !== rows) {
-        body.innerHTML = rows || '<tr><td colspan="7" class="muted">No tiles yet – pick a template or add a tile.</td></tr>';
+        body.innerHTML = rows || '<tr><td colspan="8" class="muted">No tiles yet – pick a template or add a tile.</td></tr>';
         body._last = rows;
         body.querySelectorAll('tr[data-id]').forEach((tr) => (tr.onclick = (e) => {
             if (e.target.closest('button,input')) return;
@@ -196,6 +232,9 @@ function fillEditor(z, force) {
     setVal('z-low-latency', z.low_latency, force);
     setVal('z-low-cpu', z.low_cpu, force);
     setVal('z-loop', z.loop, force);
+    setVal('z-hwdec', z.hwdec || '', force);
+    $('z-decoder').innerHTML = z.decoder && z.decoder.width
+        ? `${decoderText(z.decoder)} ${z.decoder.hwdec ? '(' + esc(z.decoder.hwdec) + ')' : '– software decoding'}` : '';
     setVal('z-audio', z.audio, force);
     if (force || document.activeElement !== $('z-volume')) {
         $('z-volume').value = z.volume; $('z-volume-value').textContent = z.volume;

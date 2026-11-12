@@ -67,6 +67,7 @@ class ZonePlayer:
         self.tally = "off"              # off | preview | program | standby
         self.low_latency = True         # for live streams
         self.low_cpu = False            # skip loop filter + frame dropping
+        self.hwdec = ""                 # per-tile override, "" = use global setting
         self.autoplay = False           # should be playing (restored after reboot / by watchdog)
 
         # --- runtime state -----------------------------------------------
@@ -79,6 +80,7 @@ class ZonePlayer:
         self.restart_attempts = 0
         self.next_restart_at = 0.0
         self.last_error = None
+        self.decoder = {}               # hwdec-current, codec, resolution, fps, drops
 
         if config:
             self.apply_config(config)
@@ -86,7 +88,7 @@ class ZonePlayer:
 
     # ------------------------------------------------------------------ config
     CONFIG_KEYS = ("name", "source", "volume", "loop", "audio", "show_label",
-                   "label_position", "tally", "low_latency", "low_cpu", "autoplay")
+                   "label_position", "tally", "low_latency", "low_cpu", "autoplay", "hwdec")
 
     def apply_config(self, cfg):
         for key in self.CONFIG_KEYS:
@@ -116,6 +118,7 @@ class ZonePlayer:
             "duration": self.duration,
             "is_stream": self.is_stream,
             "error": self.last_error,
+            "decoder": self.decoder,
             "pid": self.process.pid if self.is_running() else None,
         })
         return cfg
@@ -309,11 +312,35 @@ class ZonePlayer:
             self.last_progress_time = time.time()
         return True
 
+    def poll_decoder(self):
+        """Decoder diagnostics: is hardware decoding active, what is being decoded,
+        and is the tile keeping up (dropped frames)."""
+        if not self.is_running():
+            self.decoder = {}
+            return
+        hw = self._get("hwdec-current")
+        params = self._get("video-params") or {}
+        self.decoder = {
+            "hwdec": hw if hw not in (None, "", "no") else None,
+            "codec": self._get("video-format") or self._get("video-codec"),
+            "width": params.get("w"),
+            "height": params.get("h"),
+            "pixelformat": params.get("hw-pixelformat") or params.get("pixelformat"),
+            "fps": self._get("container-fps"),
+            "decoder_drops": self._get("decoder-frame-drop-count"),
+            "vo_drops": self._get("frame-drop-count"),
+        }
+
     # --------------------------------------------------------------- internals
     def _build_command(self, source):
         g = self.geometry
         s = self.settings
-        cmd = [
+        cmd = []
+        nice = int(s.get("nice", 0) or 0)
+        if nice > 0 and shutil.which("nice"):
+            # keep X, the web UI and SSH responsive even if the decoders saturate the CPU
+            cmd += ["nice", "-n", str(min(nice, 19))]
+        cmd += [
             "mpv",
             f"--title={self.window_title}",
             "--no-border", "--no-osc", "--no-osd-bar", "--osd-level=0",
@@ -321,7 +348,7 @@ class ZonePlayer:
             "--keep-open=yes", "--force-window=yes", "--idle=yes", "--ontop=yes",
             "--cursor-autohide=always", "--no-terminal",
             f"--vo={s.get('vo', 'xv')}",
-            f"--hwdec={s.get('hwdec', 'auto')}", "--hwdec-codecs=all",
+            f"--hwdec={self.hwdec or s.get('hwdec', 'auto')}", "--hwdec-codecs=all",
             f"--geometry={g['width']}x{g['height']}+{g['x']}+{g['y']}",
             "--autofit-larger=100%x100%", "--no-keepaspect-window",
             f"--input-ipc-server={self.socket_path}",

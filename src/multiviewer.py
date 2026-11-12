@@ -5,6 +5,8 @@ persistence (survives reboots) and the built-in per-zone stream watchdog.
 """
 
 import json
+import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -23,6 +25,8 @@ DEFAULT_SETTINGS = {
     "gap": 4,                   # default gap between tiles for templates (px)
     "watchdog": True,
     "freeze_timeout": 12,       # seconds without progress before a stream is restarted
+    "nice": 5,                  # run decoders at lower priority so the system stays responsive
+    "overload_guard": True,     # postpone watchdog restarts while the CPU is saturated
     "extra_mpv_args": [],
 }
 
@@ -57,7 +61,9 @@ class Multiviewer:
         self.next_id = 1
         self.lock = threading.RLock()
         self._stop_event = threading.Event()
+        self.system = {}
         self._load_state()
+        self.update_system_stats()
 
     # ------------------------------------------------------------ lookup
     def get(self, zone_id):
@@ -74,6 +80,7 @@ class Multiviewer:
                             "height": self.settings["display_height"]},
                 "settings": self.settings,
                 "audio_zone": audio,
+                "system": self.system,
                 "zones": [z.to_status() for z in self.zones],
             }
 
@@ -355,12 +362,62 @@ class Multiviewer:
             z._kill()  # keep autoplay flag so zones come back after restart
 
     def _watchdog_loop(self, interval):
+        cycle = 0
         while not self._stop_event.wait(interval):
+            cycle += 1
+            if cycle % 2 == 0:
+                self.update_system_stats()
+            self._restarted_this_cycle = False
             for z in list(self.zones):
                 try:
                     self._check_zone(z)
+                    if cycle % 3 == 0:
+                        z.poll_decoder()
                 except Exception as e:  # noqa: BLE001
                     print(f"Watchdog zone {z.id}: {e}")
+
+    # ------------------------------------------------------------ system stats
+    def update_system_stats(self):
+        st = {"cores": os.cpu_count() or 1}
+        try:
+            st["load"] = round(os.getloadavg()[0], 2)
+        except OSError:
+            pass
+        try:
+            st["temp_c"] = round(int(open("/sys/class/thermal/thermal_zone0/temp").read()) / 1000, 1)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            mem = {}
+            for line in open("/proc/meminfo"):
+                k, v = line.split(":", 1)
+                mem[k] = int(v.split()[0])
+            st["mem_total_mb"] = mem["MemTotal"] // 1024
+            st["mem_avail_mb"] = mem["MemAvailable"] // 1024
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            st["model"] = open("/proc/device-tree/model").read().strip("\x00").strip()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                                 text=True, timeout=2).stdout
+            val = int(out.strip().split("=")[1], 16)
+            st["throttled_raw"] = hex(val)
+            st["undervoltage_now"] = bool(val & 0x1)
+            st["throttled_now"] = bool(val & 0x4) or bool(val & 0x2)
+            st["soft_temp_limit_now"] = bool(val & 0x8)
+            st["undervoltage_since_boot"] = bool(val & 0x10000)
+            st["throttled_since_boot"] = bool(val & 0x40000) or bool(val & 0x20000)
+        except Exception:  # noqa: BLE001
+            pass
+        self.system = st
+        return st
+
+    def overloaded(self):
+        load, cores = self.system.get("load"), self.system.get("cores", 1)
+        return load is not None and load > cores * 1.5
 
     def _check_zone(self, z):
         if z.status in ("stopped",) or not z.autoplay:
@@ -386,6 +443,18 @@ class Multiviewer:
 
         if now < z.next_restart_at:
             return
+        # Restarting while the CPU is saturated just adds load (new connection, demuxer
+        # probing, keyframe wait) and can snowball. One restart per cycle, none on overload.
+        if getattr(self, "_restarted_this_cycle", False):
+            return
+        if self.settings.get("overload_guard", True) and self.overloaded() and alive:
+            z.health = "reconnecting"
+            z.next_restart_at = now + 10
+            print(f"Watchdog: zone {z.id} {problem}, but CPU overloaded "
+                  f"(load {self.system.get('load')}) -> postponing restart")
+            z.update_overlay()
+            return
+        self._restarted_this_cycle = True
         z.restart_attempts += 1
         z.health = "reconnecting" if z.restart_attempts <= 3 else "lost"
         backoff = min(60, 3 * (2 ** min(z.restart_attempts - 1, 5)))

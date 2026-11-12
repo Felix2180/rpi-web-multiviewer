@@ -548,3 +548,6 @@ body {
     transition: all .2s; pointer-events: none; max-width: 420px; z-index: 100; }
 .toast.error { background: var(--danger); }
 .toast.show { opacity: 1; transform: translateY(0); }
+.sys-info { font-size: 13px; color: var(--text-muted); }
+.warn { color: var(--warning); font-weight: 600; }
+.zone-table td.dec { white-space: nowrap; font-size: 12px; }

@@ -13,6 +13,7 @@
         <div class="header-actions">
             <button id="play-all" class="btn btn-success">▶ Play all</button>
             <button id="stop-all" class="btn btn-danger">⏹ Stop all</button>
+            <div id="sys-info" class="sys-info"></div>
             <div class="header-info">
                 <span id="status-indicator" class="status-stopped">●</span>
                 <span id="status-text">0 / 0 live</span>
@@ -63,7 +64,7 @@
 
             <h3>Tiles</h3>
             <table class="zone-table">
-                <thead><tr><th></th><th>Name</th><th>Source</th><th>State</th><th>Audio</th><th>Tally</th><th></th></tr></thead>
+                <thead><tr><th></th><th>Name</th><th>Source</th><th>Decoder</th><th>State</th><th>Audio</th><th>Tally</th><th></th></tr></thead>
                 <tbody id="zone-table-body"></tbody>
             </table>
         </div>
@@ -128,6 +129,19 @@
                     </div>
 
                     <div class="control-group">
+                        <label>Hardware decoding for this tile</label>
+                        <select id="z-hwdec" class="video-select">
+                            <option value="">use global setting</option>
+                            <option value="auto">auto</option>
+                            <option value="v4l2m2m-copy">v4l2m2m-copy (Pi 4 H.264)</option>
+                            <option value="drm-copy">drm-copy (HEVC)</option>
+                            <option value="drm">drm</option>
+                            <option value="no">off (software)</option>
+                        </select>
+                        <div id="z-decoder" class="muted"></div>
+                    </div>
+
+                    <div class="control-group">
                         <label>Geometry</label>
                         <div class="geometry-grid">
                             <div><label>X</label><input type="number" id="z-x" class="input-number"></div>
@@ -144,6 +158,26 @@
                         <button id="z-delete" class="btn btn-danger btn-sm">🗑 Delete</button>
                     </div>
                 </div>
+            </div>
+
+            <div class="section">
+                <h3>Performance</h3>
+                <div class="control-group">
+                    <label>Hardware decoding (global)</label>
+                    <select id="s-hwdec" class="video-select">
+                        <option value="auto">auto</option>
+                        <option value="auto-copy">auto-copy</option>
+                        <option value="v4l2m2m-copy">v4l2m2m-copy (Pi 4 H.264)</option>
+                        <option value="drm-copy">drm-copy (HEVC)</option>
+                        <option value="drm">drm</option>
+                        <option value="no">off (software)</option>
+                    </select>
+                </div>
+                <div class="geometry-grid">
+                    <div><label>Decoder threads / tile</label><input type="number" id="s-threads" class="input-number" min="1" max="4"></div>
+                    <div><label>Decoder priority (nice)</label><input type="number" id="s-nice" class="input-number" min="0" max="19"></div>
+                </div>
+                <p class="muted">Takes effect on the next play/reconnect of each tile.</p>
             </div>
 
             <div class="section">
