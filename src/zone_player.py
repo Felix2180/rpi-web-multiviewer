@@ -13,6 +13,7 @@ import socket
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 
 STREAM_PREFIXES = ("rtsp://", "rtsps://", "rtmp://", "rtmps://", "srt://", "udp://",
@@ -49,6 +50,8 @@ class ZonePlayer:
         self.id = int(zone_id)
         self.video_dir = Path(video_dir)
         self.settings = settings          # shared dict owned by the Multiviewer
+        # socket path is unique per MPV process (set in play()), so a zone can be
+        # renumbered while running without colliding with another zone's socket
         self.socket_path = f"/tmp/mpv-mv-zone-{self.id}.sock"
         self.window_title = f"mvzone-{self.id}"
         self.process = None
@@ -161,6 +164,7 @@ class ZonePlayer:
             self.apply_config(opts)
 
             self._kill()
+            self.socket_path = f"/tmp/mpv-mv-zone-{self.id}-{uuid.uuid4().hex[:8]}.sock"
             self.status = "starting"
             self.last_error = None
             cmd = self._build_command(resolved)
@@ -231,8 +235,11 @@ class ZonePlayer:
     def set_geometry(self, x, y, width, height):
         """Move/resize the live window without restarting the feed (xdotool)."""
         with self.lock:
-            self.geometry = {"x": int(x), "y": int(y),
-                             "width": max(32, int(width)), "height": max(32, int(height))}
+            new = {"x": int(x), "y": int(y),
+                   "width": max(32, int(width)), "height": max(32, int(height))}
+            if new == self.geometry:
+                return True
+            self.geometry = new
             if not self.is_running():
                 return True
             g = self.geometry
@@ -256,6 +263,15 @@ class ZonePlayer:
                     self.pause(True)
             self.update_overlay()
             return True
+
+    def set_id(self, new_id):
+        """Renumber this zone. A running feed keeps playing; only the window title
+        (used by xdotool) is updated."""
+        with self.lock:
+            self.id = int(new_id)
+            self.window_title = f"mvzone-{self.id}"
+            if self.is_running():
+                self._send({"command": ["set_property", "title", self.window_title]})
 
     def raise_window(self):
         if self.is_running() and shutil.which("xdotool"):

@@ -58,7 +58,6 @@ class Multiviewer:
         self.state_file = self.base_dir / "config" / "state.json"
         self.settings = dict(DEFAULT_SETTINGS)
         self.zones = []                     # list order == stacking order (last = on top)
-        self.next_id = 1
         self.lock = threading.RLock()
         self._stop_event = threading.Event()
         self.system = {}
@@ -84,12 +83,50 @@ class Multiviewer:
                 "zones": [z.to_status() for z in self.zones],
             }
 
+    # ------------------------------------------------------------ ids
+    def free_id(self, taken=None):
+        """Lowest positive ID not in use, so IDs stay small and predictable
+        (Quad -> Fullscreen -> Quad gives 1-4 again, not 5-7)."""
+        used = {z.id for z in self.zones} if taken is None else set(taken)
+        i = 1
+        while i in used:
+            i += 1
+        return i
+
+    def renumber(self, zone_id, new_id):
+        """Give a zone another ID. If the target ID is taken, the two zones swap IDs."""
+        new_id = int(new_id)
+        if new_id < 1:
+            raise ValueError("ID must be >= 1")
+        with self.lock:
+            zone = self.get(zone_id)
+            if zone.id == new_id:
+                return zone
+            other = next((z for z in self.zones if z.id == new_id), None)
+            old_id = zone.id
+            zone.set_id(new_id)
+            if other:
+                other.set_id(old_id)
+                other.update_overlay()
+            zone.update_overlay()
+            self.save_state()
+            return zone
+
+    def renumber_by_position(self):
+        """Renumber all zones 1..n in reading order (top-left -> bottom-right)."""
+        with self.lock:
+            ordered = sorted(self.zones, key=lambda z: (z.geometry["y"], z.geometry["x"]))
+            for i, z in enumerate(ordered, start=1):
+                z.set_id(i)
+            self.save_state()
+        return self.status()
+
     # ------------------------------------------------------------ zones
     def add_zone(self, cfg=None, play=None):
         cfg = dict(cfg or {})
         with self.lock:
-            zid = self.next_id
-            self.next_id += 1
+            zid = int(cfg["id"]) if cfg.get("id") and int(cfg["id"]) not in \
+                {z.id for z in self.zones} else self.free_id()
             if "geometry" not in cfg:
                 W, H = self.settings["display_width"], self.settings["display_height"]
                 cfg["geometry"] = {"x": W // 4, "y": H // 4, "width": W // 2, "height": H // 2}
@@ -261,35 +298,83 @@ class Multiviewer:
             return {
                 "display": {"width": self.settings["display_width"],
                             "height": self.settings["display_height"]},
-                "zones": [{k: v for k, v in z.to_config().items() if k not in ("id", "autoplay")}
+                "zones": [{k: v for k, v in z.to_config().items() if k != "autoplay"}
                           for z in self.zones],
             }
 
     def load_layout(self, layout, autoplay=True):
-        """Switch to a saved layout. Running zones whose source also appears in the new
-        layout are re-used (just moved) so live feeds don't drop out while switching."""
-        new_cfgs = layout.get("zones", [])
+        """Switch to a saved layout. Zones get the IDs stored in the preset, so API
+        calls like /api/zones/2/... always hit the same tile of a layout.
+        Running feeds are kept wherever possible (no black frame while switching):
+          1. same ID and same source  -> keep running, just move/resize
+          2. same source, other ID    -> keep running and renumber
+          3. otherwise                 -> (re)start with the preset's source"""
+        cfgs = [dict(c) for c in layout.get("zones", [])]
+        # assign IDs: explicit preset IDs first, older presets without IDs get the lowest free ones
+        explicit, seen = set(), set()
+        for c in cfgs:
+            cid = c.get("id")
+            if cid is not None and int(cid) >= 1 and int(cid) not in seen:
+                c["id"] = int(cid)
+                seen.add(c["id"])
+            else:
+                c["id"] = None
+        explicit = set(seen)
+        for c in cfgs:
+            if c["id"] is None:
+                c["id"] = self.free_id(explicit)
+                explicit.add(c["id"])
+
         with self.lock:
             pool = list(self.zones)
-            new_zones = []
-            for cfg in new_cfgs:
-                reuse = next((z for z in pool if z.source and z.source == cfg.get("source")
-                              and z.is_running()), None)
-                if reuse:
-                    pool.remove(reuse)
-                    g = cfg.get("geometry", reuse.geometry)
-                    reuse.apply_config({k: v for k, v in cfg.items()
-                                        if k not in ("geometry", "audio", "tally")})
-                    reuse.set_geometry(g["x"], g["y"], g["width"], g["height"])
-                    reuse.set_tally(cfg.get("tally", "off"))
-                    reuse.set_audio(cfg.get("audio", False))
-                    new_zones.append(reuse)
-                else:
-                    zid = self.next_id
-                    self.next_id += 1
-                    new_zones.append(ZonePlayer(zid, self.video_dir, self.settings, cfg))
-            for z in pool:
+            chosen = {}
+
+            def claim(cfg, zone):
+                pool.remove(zone)
+                chosen[cfg["id"]] = (zone, cfg)
+
+            for c in cfgs:   # 1. same id + same source, running
+                z = next((z for z in pool if z.id == c["id"] and z.is_running()
+                          and z.source == c.get("source")), None)
+                if z:
+                    claim(c, z)
+            for c in cfgs:   # 2. same source, running, other id
+                if c["id"] in chosen:
+                    continue
+                z = next((z for z in pool if z.is_running() and z.source
+                          and z.source == c.get("source")), None)
+                if z:
+                    claim(c, z)
+            for c in cfgs:   # 3. same id object (not running or other source)
+                if c["id"] in chosen:
+                    continue
+                z = next((z for z in pool if z.id == c["id"]), None)
+                if z:
+                    claim(c, z)
+
+            for z in pool:   # zones not part of the new layout
                 z.stop()
+
+            new_zones = []
+            for c in cfgs:
+                entry = chosen.get(c["id"])
+                if entry is None:
+                    new_zones.append(ZonePlayer(c["id"], self.video_dir, self.settings,
+                                                {k: v for k, v in c.items() if k != "id"}))
+                    continue
+                z, _ = entry
+                source_changed = z.source != c.get("source")
+                if z.id != c["id"]:
+                    z.set_id(c["id"])
+                g = c.get("geometry", z.geometry)
+                z.apply_config({k: v for k, v in c.items()
+                                if k not in ("id", "geometry", "audio", "tally", "autoplay")})
+                z.set_geometry(g["x"], g["y"], g["width"], g["height"])
+                z.set_tally(c.get("tally", "off"))
+                z.set_audio(c.get("audio", False))
+                if source_changed and z.is_running():
+                    z.stop()
+                new_zones.append(z)
             self.zones = new_zones
             self.save_state()
 
@@ -318,7 +403,7 @@ class Multiviewer:
     def save_state(self):
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            data = {"settings": self.settings, "next_id": self.next_id,
+            data = {"settings": self.settings,
                     "zones": [z.to_config() for z in self.zones]}
             tmp = self.state_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=2))
@@ -335,7 +420,6 @@ class Multiviewer:
                                   if k in DEFAULT_SETTINGS})
             for cfg in data.get("zones", []):
                 self.zones.append(ZonePlayer(cfg["id"], self.video_dir, self.settings, cfg))
-            self.next_id = max([data.get("next_id", 1)] + [z.id + 1 for z in self.zones])
             print(f"Restored {len(self.zones)} zones from state")
         except Exception as e:  # noqa: BLE001
             print(f"State load failed: {e}")

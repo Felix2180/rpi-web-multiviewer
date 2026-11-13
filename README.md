@@ -70,6 +70,10 @@ Neu gegenüber dem Original:
 4. Tally, Audio-Follow, Label-Position und Low-Latency/Low-CPU pro Kachel einstellen
 5. **Layout preset** speichern, mit ☆ als Boot-Layout markieren
 
+**Kachel-IDs** (über sie spricht die API die Kacheln an) bleiben stabil: Neue Kacheln bekommen immer die kleinste freie ID,
+und Presets speichern die IDs mit. Ein Wechsel Quad → Fullscreen → Quad ergibt also wieder 1–4. IDs lassen sich im Editor
+oder per API ändern (eine belegte ID wird getauscht). „1→n Renumber“ nummeriert alle Kacheln in Leserichtung neu.
+
 Beim Anwenden einer Vorlage behalten die vorhandenen Kacheln ihre Quellen (in Leserichtung oben-links → unten-rechts).
 Fehlende Kacheln werden leer angelegt, überzählige gestoppt und entfernt.
 

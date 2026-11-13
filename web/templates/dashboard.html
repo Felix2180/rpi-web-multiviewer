@@ -60,6 +60,7 @@
                 <input type="number" id="grid-gap" class="input-number" value="4" min="0" max="100" title="Gap in px">
                 <button id="apply-grid" class="btn btn-secondary btn-sm">Apply grid</button>
                 <button id="add-zone" class="btn btn-primary btn-sm">＋ Add tile</button>
+                <button id="renumber" class="btn btn-secondary btn-sm" title="Renumber all tiles 1..n from top-left to bottom-right">1→n Renumber</button>
             </div>
 
             <h3>Tiles</h3>
@@ -76,6 +77,11 @@
                 <div id="zone-editor-empty" class="muted">No tile selected – click one on the canvas.</div>
 
                 <div id="zone-editor-body" style="display:none;">
+                    <div class="control-group">
+                        <label>ID <span class="muted">(used by the API; taken IDs are swapped)</span></label>
+                        <input type="number" id="z-id" class="input-number" min="1">
+                    </div>
+
                     <div class="control-group">
                         <label>Name / label</label>
                         <input type="text" id="z-name" class="input-text" placeholder="CAM 1">

@@ -212,6 +212,22 @@ def api_zone_tally(zone_id):
     return jsonify(mv.get(zone_id).to_status())
 
 
+@app.route("/api/zones/<int:zone_id>/renumber", methods=["POST"])
+@api
+def api_zone_renumber(zone_id):
+    """{"id": 3} - give the zone a new ID (swaps with the zone currently holding it)."""
+    new_id = body().get("id")
+    if new_id is None:
+        raise ValueError("id required")
+    return jsonify(mv.renumber(zone_id, new_id).to_status())
+
+
+@app.route("/api/zones/renumber-by-position", methods=["POST"])
+@api
+def api_renumber_by_position():
+    return jsonify(mv.renumber_by_position())
+
+
 @app.route("/api/zones/<int:zone_id>/layer", methods=["POST"])
 @api
 def api_zone_layer(zone_id):

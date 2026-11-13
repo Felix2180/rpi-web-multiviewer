@@ -50,6 +50,8 @@ Errors return `{"error": "..."}` with status 400/404/500.
 | POST | `/api/zones/<id>/geometry` | `{"x","y","width","height"}` |
 | POST | `/api/zones/<id>/tally` | `{"state": "program"}` |
 | POST | `/api/zones/<id>/layer` | `{"direction": "top|bottom|up|down"}` |
+| POST | `/api/zones/<id>/renumber` | `{"id": 3}`: new ID; if 3 is taken, the two zones swap IDs. A running feed keeps playing |
+| POST | `/api/zones/renumber-by-position` | –: renumber all zones 1..n from top-left to bottom-right |
 
 ## Multi-zone
 
@@ -75,7 +77,12 @@ Errors return `{"error": "..."}` with status 400/404/500.
 | POST | `/api/presets/<name>/set-default` | – loaded at boot |
 | POST | `/api/presets/clear-default` | – boot restores last state instead |
 
-Loading a preset reuses running zones whose source matches, so live feeds keep running while the layout changes.
+### Stable zone IDs
+
+- New zones always get the **lowest free ID** (Quad → Fullscreen → Quad gives 1–4 again, never 5–7).
+- Presets store each zone's ID. Loading a preset restores exactly these IDs, so `/api/zones/2/...` always addresses the same tile of a layout.
+- Older presets without stored IDs get 1..n in saved order. Save them again to pin their IDs.
+- Running feeds are kept while switching: same ID + same source → only moved; same source under another ID → renumbered without reconnect.
 
 ## Files
 
