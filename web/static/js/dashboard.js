@@ -67,6 +67,11 @@ function bindUI() {
     // --- zone editor
     const patch = (data) => sel() !== null && run(() => apiClient.updateZone(sel(), data));
     $('z-name').onchange = (e) => patch({ name: e.target.value });
+    $('z-id').onchange = (e) => run(async () => {
+        const z = await apiClient.post(`/api/zones/${sel()}/renumber`, { id: parseInt(e.target.value, 10) });
+        canvas.selectedId = z.id;
+    });
+    $('renumber').onclick = () => run(() => apiClient.post('/api/zones/renumber-by-position'));
     $('z-source').onchange = (e) => patch({ source: e.target.value.trim() || null });
     $('z-show-label').onchange = (e) => patch({ show_label: e.target.checked });
     $('z-label-pos').onchange = (e) => patch({ label_position: e.target.value });
@@ -225,6 +230,7 @@ function fillEditor(z, force) {
     $('zone-editor-body').style.display = z ? 'block' : 'none';
     $('zone-editor-id').textContent = z ? `#${z.id}` : '';
     if (!z) return;
+    setVal('z-id', z.id, force);
     setVal('z-name', z.name, force);
     setVal('z-source', z.source, force);
     setVal('z-show-label', z.show_label, force);
