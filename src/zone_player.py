@@ -6,15 +6,15 @@ Each zone runs its own borderless MPV window with its own IPC socket, so a
 dead or frozen feed never takes the other tiles down with it.
 """
 
-import json
 import os
 import shutil
-import socket
 import subprocess
 import threading
 import time
-import uuid
 from pathlib import Path
+
+import platform_support as plat
+from platform_support import IS_WINDOWS
 
 STREAM_PREFIXES = ("rtsp://", "rtsps://", "rtmp://", "rtmps://", "srt://", "udp://",
                    "rtp://", "tcp://", "http://", "https://", "av://")
@@ -52,7 +52,7 @@ class ZonePlayer:
         self.settings = settings          # shared dict owned by the Multiviewer
         # socket path is unique per MPV process (set in play()), so a zone can be
         # renumbered while running without colliding with another zone's socket
-        self.socket_path = f"/tmp/mpv-mv-zone-{self.id}.sock"
+        self.socket_path = None
         self.window_title = f"mvzone-{self.id}"
         self.process = None
         self.lock = threading.RLock()
@@ -141,7 +141,7 @@ class ZonePlayer:
             return None
         if src in TEST_SOURCES:
             return TEST_SOURCES[src]
-        if src.startswith(STREAM_PREFIXES) or src.startswith("/"):
+        if src.startswith(STREAM_PREFIXES) or os.path.isabs(src):
             return src
         path = self.video_dir / src
         if check and not path.exists():
@@ -164,25 +164,39 @@ class ZonePlayer:
             self.apply_config(opts)
 
             self._kill()
-            self.socket_path = f"/tmp/mpv-mv-zone-{self.id}-{uuid.uuid4().hex[:8]}.sock"
+            self.socket_path = plat.new_ipc_path(self.id)
             self.status = "starting"
             self.last_error = None
-            cmd = self._build_command(resolved)
-            self.process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                            stderr=subprocess.DEVNULL, start_new_session=True)
+            cmd, kwargs = plat.build_launch(self._build_command(resolved),
+                                            int(self.settings.get("nice", 0) or 0))
+            try:
+                self.process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                                stderr=subprocess.DEVNULL, **kwargs)
+            except FileNotFoundError:
+                self.status = "error"
+                self.last_error = f"mpv not found ({cmd[0]}) - install mpv or set mpv_path"
+                return False
+            plat.attach_to_job(self.process)
 
             waited = 0.0
-            while not os.path.exists(self.socket_path) and waited < 5:
+            while not plat.ipc_exists(self.socket_path) and waited < 8:
                 if self.process.poll() is not None:
                     break
                 time.sleep(0.1)
                 waited += 0.1
 
-            if not os.path.exists(self.socket_path):
+            if not plat.ipc_exists(self.socket_path):
                 self.status = "error"
                 self.last_error = "MPV did not start (no IPC socket)"
                 self._kill()
                 return False
+
+            if IS_WINDOWS:
+                # place the window ourselves (absolute coords incl. monitor offset)
+                for _ in range(30):
+                    if self._win_place():
+                        break
+                    time.sleep(0.1)
 
             self.autoplay = True
             self.status = "playing"
@@ -243,10 +257,13 @@ class ZonePlayer:
             if not self.is_running():
                 return True
             g = self.geometry
-            # keep the option in sync so a later video reconfig uses the new size
-            self._send({"command": ["set_property", "geometry",
-                                    f"{g['width']}x{g['height']}+{g['x']}+{g['y']}"]})
-            moved = self._xdotool_move()
+            if IS_WINDOWS:
+                moved = self._win_place()
+            else:
+                # keep the option in sync so a later video reconfig uses the new size
+                self._send({"command": ["set_property", "geometry",
+                                        f"{g['width']}x{g['height']}+{g['x']}+{g['y']}"]})
+                moved = self._xdotool_move()
             if not moved:
                 # No xdotool available -> restart at new position
                 pos = self.position if not self.is_stream else None
@@ -274,8 +291,30 @@ class ZonePlayer:
                 self._send({"command": ["set_property", "title", self.window_title]})
 
     def raise_window(self):
-        if self.is_running() and shutil.which("xdotool"):
+        if not self.is_running():
+            return
+        if IS_WINDOWS:
+            plat.win_raise(self.window_title)
+        elif shutil.which("xdotool"):
             self._xdotool(["search", "--name", f"^{self.window_title}$", "windowraise"])
+
+    def _win_target(self):
+        ox, oy = plat.monitor_origin(int(self.settings.get("monitor", 0) or 0))
+        g = self.geometry
+        return {"x": ox + g["x"], "y": oy + g["y"], "width": g["width"], "height": g["height"]}
+
+    def _win_place(self):
+        t = self._win_target()
+        return plat.win_move(self.window_title, t["x"], t["y"], t["width"], t["height"])
+
+    def enforce_window(self):
+        """Windows: mpv may re-apply its own geometry when the video (re)configures.
+        Called by the watchdog; puts the window back where it belongs."""
+        if not (IS_WINDOWS and self.is_running()):
+            return
+        rect = plat.win_rect(self.window_title)
+        if rect and rect != self._win_target():
+            self._win_place()
 
     # ---------------------------------------------------------------- overlay
     def update_overlay(self):
@@ -351,19 +390,14 @@ class ZonePlayer:
     def _build_command(self, source):
         g = self.geometry
         s = self.settings
-        cmd = []
-        nice = int(s.get("nice", 0) or 0)
-        if nice > 0 and shutil.which("nice"):
-            # keep X, the web UI and SSH responsive even if the decoders saturate the CPU
-            cmd += ["nice", "-n", str(min(nice, 19))]
-        cmd += [
-            "mpv",
+        cmd = [
+            plat.mpv_executable(s),
             f"--title={self.window_title}",
             "--no-border", "--no-osc", "--no-osd-bar", "--osd-level=0",
             "--really-quiet", "--no-input-default-bindings", "--input-vo-keyboard=no",
             "--keep-open=yes", "--force-window=yes", "--idle=yes", "--ontop=yes",
             "--cursor-autohide=always", "--no-terminal",
-            f"--vo={s.get('vo', 'xv')}",
+            f"--vo={s.get('vo', 'gpu' if IS_WINDOWS else 'xv')}",
             f"--hwdec={self.hwdec or s.get('hwdec', 'auto')}", "--hwdec-codecs=all",
             f"--geometry={g['width']}x{g['height']}+{g['x']}+{g['y']}",
             "--autofit-larger=100%x100%", "--no-keepaspect-window",
@@ -427,11 +461,7 @@ class ZonePlayer:
         self._cleanup_socket()
 
     def _cleanup_socket(self):
-        try:
-            if os.path.exists(self.socket_path):
-                os.remove(self.socket_path)
-        except OSError:
-            pass
+        plat.ipc_cleanup(self.socket_path)
 
     def _get(self, prop):
         resp = self._send({"command": ["get_property", prop]})
@@ -441,33 +471,15 @@ class ZonePlayer:
 
     def _send(self, command, timeout=1.0):
         """Send one IPC command and wait for the reply with the matching request_id
-        (MPV also pushes unsolicited event lines on the same socket)."""
-        if not os.path.exists(self.socket_path):
+        (MPV also pushes unsolicited event lines on the same connection)."""
+        if not plat.ipc_exists(self.socket_path):
             return None
         self._req_id += 1
         rid = self._req_id
         command = dict(command)
         command["request_id"] = rid
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(timeout)
-                sock.connect(self.socket_path)
-                sock.sendall((json.dumps(command) + "\n").encode())
-                buf = b""
-                deadline = time.time() + timeout
-                while time.time() < deadline:
-                    chunk = sock.recv(65536)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        try:
-                            msg = json.loads(line)
-                        except ValueError:
-                            continue
-                        if msg.get("request_id") == rid:
-                            return msg
+            return plat.ipc_request(self.socket_path, command, rid, timeout)
         except Exception as e:  # noqa: BLE001
             self.last_error = f"IPC: {e}"
-        return None
+            return None

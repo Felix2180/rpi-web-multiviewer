@@ -31,6 +31,9 @@ Errors return `{"error": "..."}` with status 400/404/500.
 | GET/POST | `/api/settings` | any subset of settings | see README |
 | GET/POST | `/api/display/resolution` | `{"width":1920,"height":1080}` | canvas coordinate space |
 | GET | `/api/templates` | – | `{name: tileCount}` |
+| GET | `/api/platform` | – | `{"windows": bool, "mpv": path, "base_dir": path}` |
+| GET | `/api/monitors` | – | Windows: monitors (index, x, y, width, height, primary); `[]` on the Pi |
+| POST | `/api/monitor` | `{"index": 1}` | Windows: run on this monitor and adopt its resolution |
 | GET | `/api/test-sources` | – | built-in test sources |
 
 ## Zones
