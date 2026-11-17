@@ -34,6 +34,10 @@
                         <button id="update-resolution" class="btn btn-secondary btn-sm">Set</button>
                     </div>
                 </div>
+                <div class="control-group inline" id="monitor-group" style="display:none;">
+                    <label>Monitor</label>
+                    <select id="monitor" class="video-select select-sm"></select>
+                </div>
                 <div class="control-group inline">
                     <label>Snap</label>
                     <select id="snap" class="video-select select-sm">
@@ -142,6 +146,8 @@
                             <option value="v4l2m2m-copy">v4l2m2m-copy (Pi 4 H.264)</option>
                             <option value="drm-copy">drm-copy (HEVC)</option>
                             <option value="drm">drm</option>
+                            <option value="d3d11va">d3d11va (Windows)</option>
+                            <option value="nvdec">nvdec (Windows, NVIDIA)</option>
                             <option value="no">off (software)</option>
                         </select>
                         <div id="z-decoder" class="muted"></div>
@@ -173,6 +179,9 @@
                     <select id="s-hwdec" class="video-select">
                         <option value="auto">auto</option>
                         <option value="auto-copy">auto-copy</option>
+                        <option value="auto-safe">auto-safe (Windows default)</option>
+                        <option value="d3d11va">d3d11va (Windows)</option>
+                        <option value="nvdec">nvdec (Windows, NVIDIA)</option>
                         <option value="v4l2m2m-copy">v4l2m2m-copy (Pi 4 H.264)</option>
                         <option value="drm-copy">drm-copy (HEVC)</option>
                         <option value="drm">drm</option>

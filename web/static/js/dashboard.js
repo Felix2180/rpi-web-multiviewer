@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     canvas.onChange = (z) => fillGeometry(z.geometry);
     canvas.onCommit = (z) => run(() => apiClient.updateZone(z.id, { geometry: z.geometry }), false);
     bindUI();
-    await Promise.all([loadTemplates(), loadFiles(), loadPresets(), loadTestSources()]);
+    await Promise.all([loadTemplates(), loadFiles(), loadPresets(), loadTestSources(), loadMonitors()]);
     await refresh();
     setInterval(refresh, 1000);
 });
@@ -250,6 +250,21 @@ function fillEditor(z, force) {
     $('z-tally').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.v === z.tally));
     $('z-pause').textContent = z.status === 'paused' ? '▶ Resume' : '⏸';
     $('z-error').textContent = z.status === 'error' && z.error ? `⚠ ${z.error}` : '';
+}
+
+// ------------------------------------------------------------------ monitors (Windows)
+async function loadMonitors() {
+    let mons = [];
+    try { mons = await apiClient.get('/api/monitors'); } catch { return; }
+    if (!mons.length) return;                       // Raspberry Pi: no selector
+    $('monitor-group').style.display = '';
+    $('monitor').innerHTML = mons.map((m) =>
+        `<option value="${m.index}">${m.index + 1}: ${m.width}×${m.height}${m.primary ? ' (primary)' : ''}</option>`).join('');
+    try {
+        const st = await apiClient.getStatus();
+        $('monitor').value = st.settings.monitor || 0;
+    } catch { /* ignore */ }
+    $('monitor').onchange = (e) => run(() => apiClient.post('/api/monitor', { index: parseInt(e.target.value, 10) }));
 }
 
 // ------------------------------------------------------------------ templates / presets / files

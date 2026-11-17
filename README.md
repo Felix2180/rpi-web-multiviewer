@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/Felix2180/rpi-web-multiviewer
 
-Web-gesteuerter Multiviewer für Raspberry Pi 5 und Pi 4 auf Basis von
+Web-gesteuerter Multiviewer für Raspberry Pi 5, Pi 4 und Windows auf Basis von
 [raspberry-pi-single-zone-video-player](https://github.com/keep-on-walking/raspberry-pi-single-zone-video-player).
 Statt einer Videozone gibt es beliebig viele **Kacheln**. Jede Kachel ist ein eigener mpv-Prozess
 mit eigener Quelle, eigenem Label, Tally-Rahmen und eigenem Watchdog.
@@ -41,6 +41,51 @@ sudo reboot
 ```
 
 Danach `http://<pi-ip>:5000` öffnen. Der Bildschirm bleibt schwarz, bis eine Kachel läuft.
+
+### Windows
+
+Läuft auch unter Windows 10/11, z. B. auf einem Mini-PC oder Laptop mit zweitem Monitor. Jede Kachel ist ein randloses
+mpv-Fenster. Der Multiviewer belegt den gewählten Monitor komplett und liegt über allen anderen Fenstern.
+
+**Einzeiler** (PowerShell, kein Admin nötig):
+
+```powershell
+irm https://raw.githubusercontent.com/Felix2180/rpi-web-multiviewer/main/install-windows.ps1 | iex
+```
+
+**Oder manuell:** Repo als ZIP herunterladen ([main.zip](https://github.com/Felix2180/rpi-web-multiviewer/archive/refs/heads/main.zip)),
+entpacken, dann im Ordner:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install-windows.ps1
+```
+
+Der Installer
+- installiert bei Bedarf Python 3.12 und mpv (`shinchiro.mpv`) per winget,
+- legt eine eigene Python-Umgebung (`.venv`) an,
+- gibt Port 5000 in der Firewall frei (nur mit Admin-Rechten, sonst fragt Windows beim ersten Start),
+- legt eine Verknüpfung im Autostart-Ordner an (startet ohne Konsolenfenster bei der Anmeldung),
+- startet den Multiviewer und öffnet `http://localhost:5000`.
+
+Optionen: `-NoAutostart`, `-NoFirewall`, `-Port 8080`. Beim Einzeiler landet alles in `%LOCALAPPDATA%\rpi-web-multiviewer`.
+Ein erneuter Aufruf aktualisiert die Installation. Videos, Presets und Zustand bleiben dabei erhalten.
+
+| | |
+|---|---|
+| Monitor wählen | Dropdown **Monitor** oben im Dashboard. Die Auflösung wird automatisch übernommen |
+| Starten mit Konsole (Fehlersuche) | `start-multiviewer.bat` |
+| Stoppen | `stop-multiviewer.bat` (alle Kachel-Fenster schließen mit) |
+| Logs | `logs\app.log` |
+| mpv liegt woanders | `POST /api/settings {"mpv_path": "D:\\Tools\\mpv\\mpv.exe"}` oder `mpv.exe` nach `mpv\` im Projektordner legen |
+
+Unterschiede zum Pi:
+- Video-Ausgabe ist `vo=gpu`, Hardware-Dekodierung `auto-safe` (D3D11). Unter **Performance** lassen sich `d3d11va` und `nvdec` wählen.
+- Kachel-Fenster werden über die Win32-API positioniert, die Windows-Anzeigeskalierung (125 %/150 %) wird berücksichtigt.
+- Beendet sich der Server (auch per Absturz), schließen alle mpv-Fenster automatisch mit (Job Object). Übrig gebliebene Kachel-Fenster
+  eines alten Laufs werden beim Start aufgeräumt.
+- Systemanzeige: CPU und RAM über `psutil`, keine Temperatur bzw. Drosselungsanzeige.
+- Windows-Benachrichtigungen, Updates oder die Taskleiste können sich über die Kacheln legen. Für Dauerbetrieb Fokus-Assistent bzw.
+  „Nicht stören“ aktivieren und die Taskleiste auf dem Multiviewer-Monitor ausblenden.
 
 ### Update
 

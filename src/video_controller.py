@@ -13,11 +13,20 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
+import platform_support as plat
 from layout_manager import LayoutManager
 from multiviewer import TEMPLATES, Multiviewer
 from zone_player import TEST_SOURCES
 
-BASE_DIR = Path(os.environ.get("MV_BASE_DIR", "/opt/rpi-video-player"))
+# Pi: /opt/rpi-video-player (install.sh). Windows: portable, data lives next to the code.
+_DEFAULT_BASE = Path(__file__).resolve().parent.parent if plat.IS_WINDOWS else Path("/opt/rpi-video-player")
+BASE_DIR = Path(os.environ.get("MV_BASE_DIR", _DEFAULT_BASE))
+
+if plat.IS_WINDOWS:
+    plat.enable_dpi_awareness()
+    _orphans = plat.kill_orphaned_tiles()
+    if _orphans:
+        print(f"Closed {_orphans} leftover tile window(s) from a previous run")
 VIDEO_DIR = BASE_DIR / "data" / "videos"
 ALLOWED_EXTENSIONS = {"mp4", "avi", "mkv", "mov", "webm", "flv", "wmv", "m4v", "ts", "mxf"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
@@ -95,6 +104,35 @@ def api_resolution():
             raise ValueError("Width and height required")
         mv.update_settings({"display_width": int(d["width"]), "display_height": int(d["height"])})
     return jsonify({"width": mv.settings["display_width"], "height": mv.settings["display_height"]})
+
+
+@app.route("/api/platform", methods=["GET"])
+def api_platform():
+    return jsonify({"windows": plat.IS_WINDOWS, "mpv": plat.mpv_executable(mv.settings),
+                    "base_dir": str(BASE_DIR)})
+
+
+@app.route("/api/monitors", methods=["GET"])
+def api_monitors():
+    """Windows only: available monitors (index, position, size). Empty list on the Pi."""
+    return jsonify(plat.monitors())
+
+
+@app.route("/api/monitor", methods=["POST"])
+@api
+def api_select_monitor():
+    """Windows: {"index": 1} -> run the multiviewer on monitor 1 and adopt its resolution."""
+    idx = int(body().get("index", 0))
+    mons = plat.monitors()
+    if mons and not 0 <= idx < len(mons):
+        raise ValueError(f"Monitor index must be 0..{len(mons) - 1}")
+    data = {"monitor": idx}
+    if mons:
+        data.update({"display_width": mons[idx]["width"], "display_height": mons[idx]["height"]})
+    mv.update_settings(data)
+    for z in mv.zones:
+        z.enforce_window()
+    return jsonify(mv.settings)
 
 
 @app.route("/api/templates", methods=["GET"])
@@ -482,11 +520,21 @@ def _shutdown(*_):
 
 
 if __name__ == "__main__":
+    # pythonw.exe (Windows autostart) has no console: log to logs/app.log instead
+    if sys.stdout is None or sys.stderr is None:
+        (BASE_DIR / "logs").mkdir(parents=True, exist_ok=True)
+        _log = open(BASE_DIR / "logs" / "app.log", "a", buffering=1, encoding="utf-8")
+        sys.stdout = sys.stdout or _log
+        sys.stderr = sys.stderr or _log
+    port = int(os.environ.get("MV_PORT", 5000))
+    if "--port" in sys.argv:
+        port = int(sys.argv[sys.argv.index("--port") + 1])
     print("=" * 60)
-    print("Raspberry Pi Multiviewer")
+    print("rpi-web-multiviewer" + (" (Windows)" if plat.IS_WINDOWS else ""))
     print(f"Base dir: {BASE_DIR}")
     print("=" * 60)
     signal.signal(signal.SIGTERM, _shutdown)
     atexit.register(mv.shutdown)
     startup()
-    app.run(host="0.0.0.0", port=int(os.environ.get("MV_PORT", 5000)), debug=False, threaded=True)
+    print(f"Web UI: http://localhost:{port}  |  mpv: {plat.mpv_executable(mv.settings)}")
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

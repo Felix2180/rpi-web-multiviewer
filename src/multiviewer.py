@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 
+import platform_support as plat
 from zone_player import ZonePlayer
 
 BASE_DIR = Path("/opt/rpi-video-player")
@@ -27,8 +28,12 @@ DEFAULT_SETTINGS = {
     "freeze_timeout": 12,       # seconds without progress before a stream is restarted
     "nice": 5,                  # run decoders at lower priority so the system stays responsive
     "overload_guard": True,     # postpone watchdog restarts while the CPU is saturated
+    "monitor": 0,               # Windows: which monitor the multiviewer runs on (index)
+    "mpv_path": "",             # optional explicit path to mpv / mpv.exe
     "extra_mpv_args": [],
 }
+
+DEFAULT_SETTINGS.update(plat.PLATFORM_DEFAULTS)
 
 # Templates: (cols, rows, [(col, row, colspan, rowspan), ...])
 TEMPLATES = {
@@ -455,6 +460,7 @@ class Multiviewer:
             for z in list(self.zones):
                 try:
                     self._check_zone(z)
+                    z.enforce_window()
                     if cycle % 3 == 0:
                         z.poll_decoder()
                 except Exception as e:  # noqa: BLE001
@@ -462,6 +468,9 @@ class Multiviewer:
 
     # ------------------------------------------------------------ system stats
     def update_system_stats(self):
+        if plat.IS_WINDOWS:
+            self.system = plat.windows_stats()
+            return self.system
         st = {"cores": os.cpu_count() or 1}
         try:
             st["load"] = round(os.getloadavg()[0], 2)
@@ -500,6 +509,8 @@ class Multiviewer:
         return st
 
     def overloaded(self):
+        if "cpu_percent" in self.system:
+            return self.system["cpu_percent"] > 95
         load, cores = self.system.get("load"), self.system.get("cores", 1)
         return load is not None and load > cores * 1.5
 
